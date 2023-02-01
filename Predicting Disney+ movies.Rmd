@@ -1,0 +1,461 @@
+---
+title: "DS Project"
+author: "Team 45 - Ruby Chen, Frank Hoang, Thomás Alberto Peña, Siri Shankar, & Kelsey Zhou"
+date: "10/9/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Data Cleaning and Feature Engineering
+```{r}
+#Installing and loading necessary packages
+#install.packages("readxl")
+library(readxl)
+#install.packages("tidyr")
+library(tidyr)
+#install.packages("dplyr")
+library(dplyr) 
+# install.packages("randomForest")
+library(randomForest)
+# install.packages("fastDummies")
+library(fastDummies)
+# install.packages("Metrics")
+library(Metrics)
+# install.packages("glmnet")
+library(glmnet)
+# install.packages("stringr")
+library(stringr)
+# install.packages("ggplot2")
+library(ggplot2)
+# install.packages("ggcorrplot")
+library(ggcorrplot)
+
+#Loading in data
+disneydata <- read_xlsx("IMDb_Disney_Data.xlsx")
+newdata <- read_xlsx("Disney_Plus_Titles.xlsx")
+
+#Data cleaning
+dropcolumns <- c("Position","Const","URL","Your Rating","Date Rated","Directors")
+disneydata <- disneydata[,!(names(disneydata) %in% dropcolumns)]
+disneydata <- disneydata[complete.cases(disneydata),]
+newdata <- newdata[newdata$type=="Movie", ]
+newdata$country <- ifelse(is.na(newdata$country), "United States",newdata$country)
+disneydata2 <- cbind(tolower(newdata$title),newdata$country,newdata$rating)
+disneydata$Title <- tolower(disneydata$Title)
+colnames(disneydata2) <- c("Title","Country","Classification")
+
+disney_dataset <- merge(disneydata,disneydata2,by = "Title", all.x = FALSE, all.y = FALSE)
+disney_dataset$Country <- as.character(disney_dataset$Country)
+disney_dataset$Classification <- as.character(disney_dataset$Classification)
+
+#Split rows
+dataset <- disney_dataset %>% 
+   mutate(Genres =  strsplit(Genres,split=', ', fixed=TRUE) ) %>%
+   unnest(c(Genres))
+
+dataset <- dataset %>% 
+   mutate(Country =  strsplit(Country,split=', ', fixed=TRUE) ) %>%
+   unnest(c(Country))
+
+dataset$Season <- case_when(
+  substr(dataset$`Release Date`,6,7) >="03" & substr(dataset$`Release Date`,6,7) <="05" ~ "Spring",
+  substr(dataset$`Release Date`,6,7) >="06" & substr(dataset$`Release Date`,6,7) <="08" ~ "Summer",
+  substr(dataset$`Release Date`,6,7) >="09" & substr(dataset$`Release Date`,6,7) <="11" ~ "Fall",
+  TRUE ~ "Winter" )
+dataset$Age <- 2022-dataset$Year
+dropcolumns2 <- c("Year","Release Date")
+DATA <- dataset[,!(names(dataset) %in% dropcolumns2)]
+```
+
+#EDA
+```{r}
+#Begin exploratory data analysis by exploring each column
+
+#Title
+summary(dataset$Title) #3040 titles - characters
+count(dataset,duplicated((dataset$Title))) #785 duplicated titles, titles w/multiple titles stratified
+count(dataset,is.na(dataset$Title)) #No NA's
+table(dataset$Title) 
+
+#Title Type
+summary(dataset$`Title Type`) #3040 titles - characters
+count(dataset,duplicated((dataset$`Title Type`))) #3003 duplicated, 7 uniqie types
+count(dataset,is.na(dataset$`Title Type`)) #No NA's
+table(dataset$`Title Type`) #Majority movies
+ggplot(dataset, aes(dataset$`Title Type`)) + geom_bar() + xlab("Title Type")
+
+#IMDb Rating
+summary(dataset$`IMDb Rating`) #Range from 1.6 to 8.7
+hist(dataset$`IMDb Rating`) #right-skew
+count(dataset,duplicated((dataset$`Runtime (mins)`))) #137 movies with same 
+count(dataset,is.na(dataset$`IMDb Rating`)) #No NA's
+table(dataset$`IMDb Rating`) #Majority of movies/shows between 6-8
+
+#Runtime
+summary(dataset$`Runtime (mins)`) #Range from 2 to 566
+hist(dataset$`Runtime (mins)`) #left-skew
+count(dataset,duplicated((dataset$`IMDb Rating`))) #137 Movies/Shows with the same rating
+count(dataset,is.na(dataset$`Runtime (mins)`)) #No NA's
+table(dataset$`Runtime (mins)`) 
+
+#Year
+summary(dataset$Year) #Range from 1921 to 2022
+hist(dataset$`Runtime (mins)`) #right-skew
+count(dataset,is.na(dataset$Year)) #No NA's
+table(dataset$Year) #Majority of movies between 2000-2022
+ggplot(dataset, aes(dataset$Year)) + geom_bar()+ xlab("Year")
+
+#Genres
+summary(dataset$Genres) #All characters
+count(dataset,duplicated((dataset$Genres))) #25 Movies/Shows with the same rating
+count(dataset,is.na(dataset$Genres)) #No NA's
+table(dataset$Genres) #Majority of movies/shows are family
+ggplot(dataset, aes(dataset$Genres),) + geom_bar() + xlab("Genres") 
+
+
+#Num Votes
+summary(dataset$`Num Votes`) #Range from 10 to 1380167
+hist(dataset$`Num Votes`) #right-skew
+count(dataset,is.na(dataset$Year)) #No NA's
+table(dataset$Year) #Majority of movies between 2000-2022
+ggplot(dataset, aes(dataset$`Num Votes`)) + geom_bar() + xlab("Num Votes")
+
+#Release Date
+summary(dataset$`Release Date`) #Range from 01/16/1921 to 09/08/2022
+count(dataset,duplicated((dataset$`Release Date`))) #2354 movies/shows with same date 
+count(dataset,is.na(dataset$`Release Date`)) #14 NA's
+table(dataset$`IMDb Rating`)
+ggplot(dataset, aes(dataset$`Release Date`)) + geom_bar() + xlab("Release Date")
+
+#Season
+summary(dataset$Season) #3040 - characters
+count(dataset,duplicated((dataset$Season)))
+count(dataset,is.na(dataset$Season)) #No NA's
+table(dataset$Season) #Distributed almost evenly 
+ggplot(dataset, aes(dataset$Season)) + geom_bar() + xlab("Season")
+
+#Age
+summary(dataset$Age) #Range from 0 to 101
+hist(dataset$Age) #right-skew
+count(dataset,duplicated((dataset$Age)))
+count(dataset,is.na(dataset$Age)) #No NA's
+table(dataset$Age)
+ggplot(dataset, aes(dataset$Age)) + geom_bar() + xlab("Age")
+
+#Rating Classification
+summary(model_data$classification) #3040 - characters
+count(model_data,duplicated((model_data$classification)))
+count(model_data,is.na(model_data$classification)) #No NA's
+table(model_data$classification) #Majority are rated G and PG
+ggplot(model_data, aes(model_data$classification)) + geom_bar() + xlab("Classification")
+
+#Country
+summary(model_data$country) #3040 - characters
+count(model_data,duplicated((model_data$country)))
+count(model_data,is.na(model_data$country)) #No NA's
+table(model_data$country) #Majority acome from United States
+ggplot(model_data, aes(model_data$country)) + geom_bar() + xlab("country")
+
+#Correlation plot
+numericdata <- data.frame(dataset$`IMDb Rating`, dataset$`Runtime (mins)`, dataset$Year, dataset$`Num Votes`, dataset$Age)
+colnames(numericdata) <- c("IMDb Rating", "Runtime (mins)", "Year", "Num Votes", "Age")
+ggcorrplot::ggcorrplot(cor(numericdata),title ="Correlation across all numeric variables")
+
+#Total number of movies released every year
+plot(table(disneydata$Year), title("Total no of movies/tv shows released every year"),  pch = 19, xlab = "Year Released", ylab = "#No of movies/tv shows")+
+  lines(table(disneydata$Year), type = "l",lty = 1)
+
+#Most popular rating of movies released so far
+plot(table(dataset$`IMDb Rating`), title("Most popular rating of Disney content released so far") , xlab = "IMDB Rating", ylab = "#No of movies/tv shows")+
+       lines(table(dataset$`IMDb Rating`), type = "l", lty = 1, pch=16)
+
+#Action movies over time
+Action_Genre <- filter(dataset,dataset$Genres=="Action") %>%
+  group_by(Year) %>% summarize(mean_rating = mean(`IMDb Rating`))
+
+plot(Action_Genre,  pch = 19)+
+       lines(Action_Genre, type = "l", lty = 1, pch=16)
+
+#Reality TV movies over time
+Reality_TV_Genre <- filter(dataset,dataset$Genres=="Reality-TV") %>%
+  group_by(Year) %>% summarize(mean_rating = mean(`IMDb Rating`))
+
+plot(Reality_TV_Genre,  pch = 19)+
+       lines(Reality_TV_Genre, type = "l", lty = 1, pch=16)
+
+#Animation movies over time
+Animation_Genre <- filter(dataset,dataset$Genres=="Animation") %>%
+  group_by(Year) %>% summarize(mean_rating = mean(`IMDb Rating`))
+
+plot(Animation_Genre,  pch = 19)+
+       lines(Animation_Genre, type = "l", lty = 1, pch=16)
+
+#Fantasy movies over time
+Fantasy_Genre <- filter(dataset,dataset$Genres=="Fantasy") %>%
+  group_by(Year) %>% summarize(mean_rating = mean(`IMDb Rating`))
+
+plot(Fantasy_Genre,  pch = 19)+
+       lines(Fantasy_Genre, type = "l", lty = 1, pch=16)
+
+#combine all 3 into a single line graph
+Fantasy_Genre_final <- filter(dataset,dataset$Genres=="Fantasy") %>%
+  group_by(Year,Genres) %>% summarize(mean_rating = mean(`IMDb Rating`))
+
+Animation_Genre_final <- filter(dataset,dataset$Genres=="Animation") %>%
+  group_by(Year,Genres) %>% summarize(mean_rating = mean(`IMDb Rating`))
+
+Action_Genre_final <- filter(dataset,dataset$Genres=="Action") %>%
+  group_by(Year, Genres) %>% summarize(mean_rating = mean(`IMDb Rating`))
+
+Genre_combination <- rbind(Fantasy_Genre_final,Animation_Genre_final,Action_Genre_final)
+
+plot(Genre_combination,  pch = 19, color = Genre_combination$Genres)+
+       lines(Genre_combination, type = "l", lty = 1, pch=16 , color = Genre_combination$Genres)
+
+ ggplot(Genre_combination, aes(x = Year, y = mean_rating, colour = Genres)) +
+  geom_line() +
+  geom_point() +
+  xlab("Release Year") +
+  ylab("Avg. Rating") +
+  ggtitle("Avg Disney Content Ratings Through the Years for Action, Fantasy and Animation Genres")
+
+plot(Action_Genre,  pch = 19)+
+       lines(Action_Genre, type = "l", lty = 1, pch=16) +
+  plot(Fantasy_Genre,  pch = 19)+
+       lines(Fantasy_Genre, type = "l", lty = 1, pch=16)
+
+#Genre vs rating
+Action_Genre <- filter(dataset,dataset$Genres=="Action") %>%
+  group_by(Year) %>% summarize(mean_rating = mean(`IMDb Rating`))
+
+Genre_Rating <- dataset %>% group_by(Genres) %>% summarize(mean_rating = mean(`IMDb Rating`))
+data_bar <- Genre_Rating$mean_rating
+names(data_bar) <- Genre_Rating$Genres
+barplot(data_bar,
+main="Average Rating of Disney Movie Genre",
+xlab="Genres",
+ylab="Avg Rating",
+ylim = c(0,10),
+col="#113CCF",
+cex.lab=1.5,
+cex.axis=0.75,
+cex.names=0.75,
+srt=45, xpd=TRUE,
+las = 2)
+
+###ideal movie type
+
+#### Clustering
+
+###bin ratings
+
+Rating_Bins <- dataset %>% mutate(rating_bin = cut(dataset$`IMDb Rating`, breaks=c(0, 2, 4, 6, 8, 10)))
+
+Top_rated <- filter(Rating_Bins, rating_bin == "(8,10]")
+
+unique(Top_rated$Genres[Top_rated$`Title Type` == "movie"])
+
+summary(filter(Top_rated, `Title Type` == "movie"))
+
+Ideal_dataset <- filter(Top_rated, `Title Type` == "movie")
+
+#ideal_runtime
+
+Ideal_Dataset_Grouped <- Ideal_dataset%>%group_by(Title,Season)%>%summarise(mean_rating = mean(`Runtime (mins)`))
+
+mean(Ideal_dataset$`Runtime (mins)`)
+
+max(table(Ideal_dataset$`Runtime (mins)`))
+
+ideal_runtime <- data.frame(table(Ideal_Dataset_Grouped$mean_rating))
+
+filter(ideal_runtime, Freq == 10)
+
+avg_runtime <- ideal_runtime$Var1[ideal_runtime$Freq==2]
+
+mean(as.numeric(as.character(avg_runtime)))
+
+#(105+100+149)/3 :118 mins
+
+#ideal release time
+
+ideal_release_time <- data.frame(table(Ideal_dataset$Season))
+
+ideal_release_time$Var1[max(ideal_release_time$Freq)]
+
+filter(ideal_release_time, Freq == 29)
+
+#spring
+
+#ideal release time
+
+ideal_release_time <- data.frame(table(Ideal_dataset$Season))
+
+ideal_release_time$Var1[max(ideal_release_time$Freq)]
+
+filter(ideal_release_time, Freq == 29)
+#spring
+
+#Code to collected number of tweets for each upcoming movie on Twitter
+#Need developer code to run code below:
+#options(warn=-1)
+#source("DataAnalyticsFunctions.R")
+#source("textmining_source.R")
+
+#installpkg("twitteR")
+#installpkg("ROAuth")
+#library(twitteR)
+#library(ROAuth)
+#require(RCurl)
+#download.file(url="http://curl.haxx.se/ca/cacert.pem",destfile="cacert.pem")
+#CUSTOMER_KEY <- XXX
+#CUSTOMER_SECRET <- XXX
+#ACCESS_TOKEN <- XXX
+#ACCESS_secret <- XXX
+
+#cred <- setup_twitter_oauth(CUSTOMER_KEY, CUSTOMER_SECRET, ACCESS_TOKEN, ACCESS_secret)
+                    
+# Get Tweeter Data
+#searchTwitter("#TalesOfTheJedi", n=3000)
+#searchTwitter("#MysteriousBenedictSociety", n=3000)
+#searchTwitter("#ZootopiaPlus", n=3000)
+#searchTwitter("#LimitlessWithChrisHemsworth", n=3000)
+#searchTwitter("#TheSantaClauses", n=3000)
+#searchTwitter("#MickeyTheStoryOfAMouse", n=3000)
+#searchTwitter("#EltonJohnFarewellTour", n=3000)
+#searchTwitter("#Disenchanted", n=3000)
+#searchTwitter("#Willow", n=3000)
+#searchTwitter("#RodrickRules", n=3000)
+#searchTwitter("#NationalTreasureSeries", n=3000)
+#searchTwitter("#BestInSnow", n=3000)
+#searchTwitter("#HipHopNutcracker", n=3000)
+#searchTwitter("#TheBadBatch", n=3000)
+#searchTwitter("#TheMandalorian", n=3000)
+#searchTwitter("#MoonGirlAndDevilDinosaur", n=3000)
+#searchTwitter("#SecretInvasion", n=3000)
+#searchTwitter("#AgathaCovenOfChaos", n=3000)
+#searchTwitter("#AmericanBornChinese", n=3000)
+
+
+```
+
+#Supervised Learning - Rating Prediction
+#Modeling and Evaluation: linear, randomforest, lasso, null
+```{r}
+source("DataAnalyticsFunctions.R")
+modeldata <- DATA[,-1]
+modeldata <- setNames(modeldata, c("title_type","imdb_rating","runtime","genres","num_votes","country","classification","season","age"))
+modeldata$genres <- ifelse(modeldata$genres %in% c("Adventure","Animation","Comedy","Drama","Family","Fantasy","Musical","Short"), modeldata$genres,"Others")
+modeldata$country <- str_replace(modeldata$country, " ","")
+modeldata$country <- ifelse(modeldata$country %in% c("UnitedStates","UnitedKingdom","Canada","Australia"), modeldata$country, "Others")
+modeldata$classification <- ifelse(modeldata$classification %in% c("TV-Y","TV-Y7-FV","TV-14","TV-Y7"), "Others", modeldata$classification)
+modeldata$classification <- str_replace(modeldata$classification, "-","_")
+
+model_data <- dummy_cols(modeldata, select_columns = c("title_type","genres","season","classification","country"),
+                   remove_most_frequent_dummy = T)
+
+### K Fold Cross Validation
+nfold <- 10
+n <- nrow(model_data)
+foldid <- rep(1:nfold,each=ceiling(n/nfold))[sample(1:n)]
+OOSRMSE <- data.frame(linear=rep(NA,nfold), rf=rep(NA,nfold), lasso=rep(NA,nfold), null=rep(NA,nfold))
+OOSR2 <-data.frame(linear=rep(NA,nfold), rf=rep(NA,nfold), lasso=rep(NA,nfold), null=rep(NA,nfold))
+
+for(k in 1:nfold){ 
+  train <- which(foldid!=k) # train on all but fold `k'
+  #Linear Regression
+  model.l <- lm(imdb_rating~.-title_type-genres-season-country-classification, data = model_data, subset = train)
+  pred.l <- predict(model.l, newdata = model_data[-train,])
+  OOSRMSE$linear[k] <- rmse(model_data$imdb_rating[-train], pred.l)
+  OOSRMSE$linear[k]
+  OOSR2$linear[k] <- R2(model_data$imdb_rating[-train], pred.l)
+  OOSR2$linear[k]
+  
+  #Random Forest
+  model.r <- randomForest(imdb_rating~.-title_type-genres-season-country-classification, data=model_data[train, ], nodesize=5, ntree = 500, mtry = 4)
+  pred.r <- predict(model.r, newdata = model_data[-train,])
+  OOSRMSE$rf[k] <- rmse(model_data$imdb_rating[-train], pred.r)
+  OOSRMSE$rf[k]
+  OOSR2$rf[k] <- R2(model_data$imdb_rating[-train], pred.r)
+  OOSR2$rf[k]
+  #Lasso
+  Mx<- model.matrix(imdb_rating~.-title_type-genres-season-country-classification, data=model_data[train, ])[,-1]
+  My<- model_data$imdb_rating[train]
+  lasso <- glmnet(Mx,My)
+  lasso.cv <- cv.glmnet(Mx,My)
+  model.lasso <- glmnet(Mx,My,lambda = lasso.cv$lambda.min)
+  x.new <- select(model_data[-train,],-c("imdb_rating","title_type","genres","season","country","classification"))
+  x.new  <- data.matrix(x.new)
+  pred.lasso <- predict(model.lasso, newx = x.new)
+  OOSRMSE$lasso[k] <- rmse(model_data$imdb_rating[-train], pred.lasso)
+  OOSRMSE$lasso[k]
+  OOSR2$lasso[k] <- R2(model_data$imdb_rating[-train], pred.lasso)
+  OOSR2$lasso[k]
+  
+  #Null model
+  pred.null <- rep(mean(model_data$imdb_rating),nrow(model_data[-train,]))
+  OOSRMSE$null[k] <- rmse(model_data$imdb_rating[-train], pred.null)
+  OOSRMSE$null[k]
+  OOSR2$null[k] <- R2(model_data$imdb_rating[-train], pred.null)
+  OOSR2$null[k]
+  
+  print(paste("Iteration",k,"of",nfold,"(thank you for your patience)"))
+}
+
+OOSRMSE
+OOSR2
+barplot(colMeans(OOSRMSE), las=2,xpd=FALSE ,ylim=c(0,1.1), xlab="", ylab = bquote( "Average OOS RMSE"))
+barplot(colMeans(OOSR2), las=2,xpd=FALSE ,ylim=c(0,1.0), xlab="", ylab = bquote( "Average OOS R2"))
+```
+#Prediction
+```{r}
+#Final Model with feature importance
+modeldata$genres <- as.factor(modeldata$genres)
+modeldata$country <- as.factor(modeldata$country)
+modeldata$classification <- as.factor(modeldata$classification)
+modeldata$title_type <- as.factor(modeldata$title_type)
+modeldata$season <- as.factor(modeldata$season)
+model.final <- randomForest(imdb_rating~., data=modeldata, nodesize=5, ntree = 500, mtry = 4, importance = TRUE)
+importance(model.final, type=1)
+
+
+#Clean prediction dataset
+prediction_dataset <- read_xlsx("Prediction_Dataset_Final.xlsx")
+prediction_dataset$age <- 2022-prediction_dataset$Year
+prediction_dataset$season <- case_when(
+  substr(prediction_dataset$release_date,6,7) >="03" & substr(prediction_dataset$release_date,6,7) <="05" ~ "Spring",
+  substr(prediction_dataset$release_date,6,7) >="06" & substr(prediction_dataset$release_date,6,7) <="08" ~ "Summer",
+  substr(prediction_dataset$release_date,6,7) >="09" & substr(prediction_dataset$release_date,6,7) <="11" ~ "Fall",
+  TRUE ~ "Winter" )
+prediction_dataset <- prediction_dataset %>% 
+   mutate(genres =  strsplit(genres,split=', ', fixed=TRUE) ) %>%
+   unnest(c(genres))
+prediction_dataset$classification <- str_replace(prediction_dataset$classification, "-","_")
+pred_drop <- c("Year","release_date","Official Hashtag","NumberofTweets")
+pred_DATA <- prediction_dataset[,!(names(prediction_dataset) %in% pred_drop)]
+pred_DATA$genres <- ifelse(pred_DATA$genres %in% c("Adventure","Animation","Comedy","Drama","Family","Fantasy","Musical","Short"), pred_DATA$genres,"Others")
+pred_DATA$country <- str_replace(pred_DATA$country, " ","")
+
+#Prediction
+pred_DATA$genres <- as.factor(pred_DATA$genres)
+pred_DATA$country <- as.factor(pred_DATA$country)
+pred_DATA$classification <- as.factor(pred_DATA$classification)
+pred_DATA$title_type <- as.factor(pred_DATA$title_type)
+pred_DATA$season <- as.factor(pred_DATA$season)
+levels(pred_DATA$genres) <- levels(modeldata$genres)
+levels(pred_DATA$country) <- levels(modeldata$country)
+levels(pred_DATA$classification) <- levels(modeldata$classification)
+levels(pred_DATA$title_type) <- levels(modeldata$title_type)
+levels(pred_DATA$season) <- levels(modeldata$season)
+pred.final <- predict(model.final, newdata = subset(pred_DATA, select = -Title))
+pred.final.result <- cbind(pred_DATA$Title,pred.final)
+colnames(pred.final.result)[1] <- "title"
+pred.final.result <- as.data.frame(pred.final.result, stringsAsFactors = FALSE)
+pred.final.result$pred.final <- as.numeric(pred.final.result$pred.final)
+aggregate(pred.final.result$pred.final, list(pred.final.result$title), FUN=mean) 
+```
+
+
